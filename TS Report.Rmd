@@ -1,0 +1,432 @@
+---
+title: "Changes in Combined Oral Contraceptive Pill Dispensings Following Study Finding Risk of Blood Clots"
+
+author: "Murray Keogh"
+
+date: "`r format(Sys.time(), '%d %B %Y')`"
+
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE,message=FALSE,fig.width=10, fig.height=6)
+
+library(gridExtra)
+library(ggplot2)
+library(astsa)
+library(forecast)
+library(lmtest)
+library(zoo)
+library(readr)
+library(dplyr)
+library(tidyr)
+```
+
+```{r data, include=FALSE}
+
+
+pills <- read_csv('data\pills.csv')
+
+#look at first few rows of data
+#head(pills)
+
+#summary statistics
+#summary(pills)
+
+#create separate ts objects for both combo and mini pill dispensings
+#combo_ts <- ts(pills$combined, start = c(2013, 1), end = c(2018, 6), frequency = 12)
+mini_ts <- ts(pills$mini, start = c(2013, 1), end = c(2018, 6), frequency = 12)
+
+#take a look at first few rows
+#head(combo_ts)
+#head(mini_ts)
+
+#union both combo and mini pill dispensings back into one ts object
+pills_ts <- ts.union(combo_ts,mini_ts)
+
+```
+
+```{r plots, include= FALSE}
+
+#histograms of combined and mini dispensings
+
+combined_hist <- ggplot(pills, aes(x=combined)) + geom_histogram() + ggtitle("Distribution of Combined Pill Dispensings")
+
+mini_hist <- ggplot(pills, aes(x=mini)) + geom_histogram() + ggtitle("Distribution of Progestogen-Only Pill Dispensings")
+
+#decomposition plots
+combo_de <- combo_ts %>% decompose %>% autoplot + ggtitle("Combined Pill Dispensings Decomposition")
+mini_de <- mini_ts %>% decompose %>% autoplot + ggtitle("Progestogen-Only Pill Dispensings Decomposition")
+
+#seasonal plots
+combo_season <- ggseasonplot(combo_ts) + ggtitle("Combined Pill Dispensings Seasonal Plot")
+mini_season <- ggseasonplot(mini_ts) + ggtitle("Progestogen-Only Pill Dispensings Seasonal Plot")
+
+#acf plots
+
+acf2(combo_ts)
+acf2(mini_ts)
+
+#test for autocorrelation
+
+combo_lb_test <- Box.test(combo_ts, type='Ljung-Box', lag=12)
+mini_lb_test  <- Box.test(mini_ts, type='Ljung-Box', lag=12)
+
+```
+
+```{r vectors, include=FALSE}
+
+#create time vector
+time <- seq(1,length(combo_ts)) %>% ts(start=c(2013,1), frequency=12)
+
+#create grad vectors
+
+grad <- append(rep(0,sum(as.yearmon(time(combo_ts))<'May 2015')), rep(1,sum(as.yearmon(time(combo_ts))>='May 2015'))) %>% ts(start=c(2013,1), frequency=12)
+
+grad.lag1 <- append(rep(0,sum(as.yearmon(time(combo_ts))<'June 2015')), rep(1,sum(as.yearmon(time(combo_ts))>='June 2015'))) %>% ts(start=c(2013,1), frequency=12)
+
+#create time.after vectors
+
+time.after <- append(rep(0,sum(as.yearmon(time(combo_ts))<'May 2015')), seq(1,sum(as.yearmon(time(combo_ts))>='May 2015'))) %>% ts(start=c(2013,1), frequency=12)
+
+time.after.lag1 <- append(rep(0,sum(as.yearmon(time(combo_ts))<'June 2015')), seq(1,sum(as.yearmon(time(combo_ts))>='June 2015'))) %>% ts(start=c(2013,1), frequency=12)
+
+#create month dummy variable
+
+month <- seasonaldummy(combo_ts)
+
+```
+
+```{r sr_model, include=FALSE}
+
+#fit four models to examine - only keep final model
+
+#model with normal time and monthly dummy variable
+#sr_model1 <- lm(combo_ts ~ time + grad + time.after + month)
+#model with normal time
+#sr_model2 <- lm(combo_ts ~ time + grad + time.after)
+#model with one lag time and monthly dummy variable
+sr_model3 <- lm(combo_ts ~ time + grad.lag1 + time.after.lag1 + month)
+#model with one lag time
+#sr_model4 <- lm(combo_ts ~ time + grad.lag1 + time.after.lag1)
+
+# Check residual plots
+
+combo_sr_plot <- plot(sr_model3)
+
+
+# Ljung-Box test for autocorrelation of residuals
+
+combo_sr_lb_test <- Box.test(sr_model3$residuals, lag = 12, type = "Ljung-Box")
+
+
+#compare model1 and model3
+
+# Get parameter estimates and confidence intervals
+
+combo_sr_summary <- summary(sr_model3)
+combo_sr_ci <- confint(sr_model3)
+combo_sr_aic <- AIC(sr_model3)
+
+#model3 is final model
+
+```
+
+```{r arima_model,include=FALSE}
+#Check for most appropriate AR/MA orders
+#auto.arima(combo_ts,seasonal=TRUE,xreg=cbind(grad.lag1,time.after.lag1), stepwise=FALSE)
+
+# Model estimation
+combo_arima_model <- sarima(combo_ts, p=0, d=0, q=0, P=1, D=1, Q=0, S=12, xreg=cbind(grad.lag1,time.after.lag1))
+
+# Get estimates and confidence intervals
+combo_arima_fit <- combo_arima_model$fit
+combo_arima_ci <- confint(combo_arima_model$fit)
+
+```
+
+```{r control,include = FALSE}
+
+#control series
+
+#model with one lag time and monthly dummy variable
+sr_mini_model3 <- lm(mini_ts ~ time + grad.lag1 + time.after.lag1 + month)
+
+# Check residual plots
+mini_sr_plot <- plot(sr_mini_model3)
+
+
+# Ljung-Box test for autocorrelation of residuals
+mini_sr_lb_test <- Box.test(sr_mini_model3$residuals, lag = 12, type = "Ljung-Box")
+
+# Get parameter estimates and confidence intervals
+mini_sr_summary <- summary(sr_mini_model3)
+mini_sr_ci <- confint(sr_mini_model3)
+mini_sr_aic <- AIC(sr_mini_model3)
+
+```
+
+## Student Declaration
+
+I declare that this assessment item is my own work, except where acknowledged, and has not been submitted for academic credit elsewhere or previously, or produced independently of this course (e.g. for a third party such as your place of employment) and acknowledge that the assessor of this item may, for the purpose of assessing this item: (i) Reproduce this assessment item and provide a copy to another member of the University; and/or (ii) Communicate a copy of this assessment item to a plagiarism checking service (which may then retain a copy of the assessment item on its database for the purpose of future plagiarism checking).  
+
+- [X] I understand and agree
+
+I certify that I have read and understood the University Rules in respect of Student Academic Misconduct.  
+
+- [X] I understand and agree
+
+I have a backup copy of the assessment.  
+
+- [X] I understand and agree
+
+## Introduction
+
+Oral contraceptives, or birth control pills, are taken by women to prevent pregnancy and to treat other conditions.  The pill is the most commonly used contraceptive method and approximately 50–80% of Australian women use it at some stage during their reproductive lives^1^.  There are two main types of oral contraceptives, the combined pill and the progestogen-only pill. Combined pills, while effective at reducing pregnancy, increase the risk of blood clot formation, such as deep vein thrombosis, pulmonary embolism and stroke^2^.  On 26 May 2015, a paper published in the _BMJ_ was the first to quantify the risk associated with taking combined pills and received substantial media attention worldwide.  Additionally, the study concluded that no increased risk of blood clots was found in women taking the progestogen-only pill. 
+
+The objective of this report is to explore and quantify the impact of the media attention surrounding the publication of the above study on the PBS-subsidised dispensing of both the combined and progestogen-only pill. Interrupted time series models will be used to study and quantify the impact of the peak media attention during May 2015 on the following time period's combined pill dispensings. Interrupted time series models are very useful when analyzing population level interventions and effects when randomization or clinical trial data are not possible.
+
+## Methods
+
+#### Study Setting and Population
+
+In Australia, the population is entitled to subsidized prescription medicines through the Pharmaceutical Benefits Scheme (PBS).  In this study, PBS-subsidised dispensing data is provided for both the combined and progestogen-only oral contraceptives. The data includes monthly counts (per 10,000 women of reproductive age) of PBS-subsidised dispensings between the months of January 2013 and June 2018.    
+
+#### Medicines of Interest
+
+In Australia, certain contraceptive pills are subsidised through PBS and will be included in the PBS data. However, other pill formulations are not subsidised and therefore will not be included in the data.  For combined contraceptive pills, levonorgestrel/ethinylestradiol, norethisterone/ethinylestradiol and norethisterone/mestranol are subsidised through the PBS and included, while other formulations, such as those containing drosperinone, cyproterone and desogestrel and are not captured in the data.  The progestogen-only pills, including etonogestrel, levonorgestrel, medroxyprogesterone, and norethisterone, are also subsidised and included in the data.
+
+#### Statistical Analysis
+
+To quantify the impact on the PBS-subsidised combined pill dispensings, May 2015 will be used as the intervention month. Dispensings from January 2013 to April 2015 will be defined as pre-intervention, and will be compared to dispensings from May 2015 to June 2018, defined as the post-intervention.  Additionally, a one-month lag timeframe is also explored due a possible delayed impact since the publication was not published until the last week of May.  In this case, the pre-intervention period is January 2013 to May 2015 and the post-intervention period is June 2015 to June 2018.
+
+The plots for both the combined and progestogen-only pills are displayed below (Fig 1, Fig 2).  The red dashed line indicates the lag intervention date of June 2015.  
+
+```{r ts_plot, echo=FALSE}
+
+#plot both time series
+par(mfrow=c(2,1), cex.lab=.6)
+
+#plot for combo pills
+tsplot(combo_ts, ylim=c(200,400), xlab="Month", ylab="Number of Dispensings Per 10,000 Women",col="dodgerblue2",gg=TRUE,lwd = 2)
+title(main="Fig 1. Combo Oral Contraceptive Monthly Dispensings in Australia, Jan 2013-June 2018", cex.main=.8, adj=0)
+abline(v='2015.417',lty="dashed",col="red",lwd=1.5)
+
+#plot for mini pills
+tsplot(mini_ts,  ylim=c(40,100), xlab="Month", ylab="Number of Dispensings Per 10,000 Women",col="gray40",gg=TRUE,lwd=2)
+title(main="Fig 2. Progestogen-Only Oral Contraceptive Monthly Dispensings in Australia, Jan 2013-June 2018", cex.main=.8, adj=0)
+abline(v='2015.417',lty="dashed",col="red",lwd=1.5)
+
+
+```
+
+It is important to propose an impact model a priori in order to decrease the likelihood of the intervention effect being due to random chance^3^.  From observations made during the exploratory data analysis process, the change in combined pill dispensings will be best described by a change in slope, though a slight level change might occur as well.  A level shift indicates an immediate and sustained change in monthly dispensings, while a change in slope reflects a gradual change in monthly dispensings^5^.
+
+Interrupted time series analysis will be used to quantify the changes in monthly dispensings following the study publication. Both the combined and progestogen-only pills show evidence of seasonality and autocorrelation, while no outliers are present in the data.  The autocorrelation is evident at low lag intervals, so I assume that the majority of the autocorrelation is due to the apparent post-intervention trends in the data.  Due to this, both ARIMA and segmented regression models are explored to control for the seasonality and autocorrelation.  Both the ARIMA and segmented regression models fit the data well and give similar results, so a segmented regression model is used as the final model.  
+
+A segmented regression model fits a least squares regression line to the pre and post intervention periods.  The model assumes a linear relationship between time and the outcome in each segment, and can estimate the level and trend for monthly dispensings before the publication and the changes in level and trend following the publication^4^.  Due to the non complexity of the seasonal and trend effects, a segmented regression model adequately controls for both seasonality and autocorrelation. To control for seasonality, a monthly dummy variable is used. The autocorrelation is controlled by fitting least square regression lines to each segment. The final segmented regression model uses a one month lag to account for the time it takes the effect to manifest^4^ and has a lower AIC when compared to the no lag model.   
+
+Additionally, dispensings after the study publication are compared to expected dispensings had the trend prior to the publication continued, also called the counter factual. These estimates can then be compared against observations for the post-intervention time period, and an overall difference attributed to the intervention can be obtained^6^.  Furthermore, the progestogen-only pill dispensings can be used as a control series. This data will be modeled in a similar method to the combined pill data.  By using a control series, the effect of the study publication on combined pill dispensings can be compared to the effect on the progestogen-only pill dispensings, which should not be affected by the study publication.
+
+## Results
+
+#### Summary of Data
+
+The descriptive statistics for the combined and progestogen-only pill dispensings are shown below in Fig 3. Both the combined and progestogen-only pill dispensings have a lower mean and median post-intervention value when compared to pre-intervention.  
+
+``` {r data_table, echo=FALSE}
+
+combo_overall <- pills %>% summarise("Records" = n(), "Mean"=mean(combined),"Median"=median(combined),"Min"=min(combined),"Max"=max(combined),"SD"=sd(combined),"IQR"=IQR(combined),"25% Quantile" = quantile(combined,.25),"75% Quantile" = quantile(combined,.75))
+
+combo_pre <- pills %>% slice_head(n=29) %>% summarise("Records" = n(), "Mean"=mean(combined),"Median"=median(combined),"Min"=min(combined),"Max"=max(combined),"SD"=sd(combined),"IQR"=IQR(combined),"25% Quantile" = quantile(combined,.25),"75% Quantile" = quantile(combined,.75))
+
+combo_post <- pills %>% slice_tail(n=37) %>% summarise("Records" = n(), "Mean"=mean(combined),"Median"=median(combined),"Min"=min(combined),"Max"=max(combined),"SD"=sd(combined),"IQR"=IQR(combined),"25% Quantile" = quantile(combined,.25),"75% Quantile" = quantile(combined,.75))
+
+mini_overall <- pills %>% summarise("Records" = n(), "Mean"=mean(mini),"Median"=median(mini),"Min"=min(mini),"Max"=max(mini),"SD"=sd(mini),"IQR"=IQR(mini),"25% Quantile" = quantile(mini,.25),"75% Quantile" = quantile(mini,.75))
+
+mini_pre <- pills %>% slice_head(n=29) %>% summarise("Records" = n(), "Mean"=mean(mini),"Median"=median(mini),"Min"=min(mini),"Max"=max(mini),"SD"=sd(mini),"IQR"=IQR(mini),"25% Quantile" = quantile(mini,.25),"75% Quantile" = quantile(mini,.75))
+
+mini_post <- pills %>% slice_tail(n=37) %>% summarise("Records" = n(), "Mean"=mean(mini),"Median"=median(mini),"Min"=min(mini),"Max"=max(mini),"SD"=sd(mini),"IQR"=IQR(mini),"25% Quantile" = quantile(mini,.25),"75% Quantile" = quantile(mini,.75))
+
+
+combined <- rbind(combo_overall,combo_pre,combo_post,mini_overall,mini_pre,mini_post)
+
+combined$Grouping <- c("Combined - Overall","Combined - Pre-Intervention","Combined - Post-Intervention","Progestogen-Only - Overall","Progestogen-Only - Pre-Intervention","Progestogen-Only - Post-Intervention")
+
+final_df <- combined %>%
+  select(Grouping, everything())
+
+knitr::kable(final_df, align = "c",digits=1, caption = "Fig 3. Combined and Progestogen-Only Dispensing Statistics")
+
+```
+#### Model Results
+
+The results for both the combined and progestogen-only pill segmented regression models are displayed below.  Prior to the intervention in June 2015, the combined pill dispensings were constant over time with a slope of 0.2 per month (95% CI : -0.1,0.4). After the release of the study publication in May 2015 and beginning in June 2015, the dispensings per month decreased by a level shift of 4.8 (95% CI : -9.8,0.2).  However, due to the 95% CI containing zero, this result is not statistically significant. There was a change in slope of -1.3 (95% CI : -1.6 to -1.0). This means that after the study publication, dispensings were decreasing by -1.3 (95% CI : -1.6,-1.0) per month. As a result, the release of the study publication appears to have been associated with a change in combined pill monthly dispensings in Australia.
+
+Additionally, the progestogen-only pill dispensings were modeled to be used as a control series. There was a change in slope of -0.3 (95% CI : -0.4 to -0.2). This means that after the study publication, dispensings were decreasing by -0.3 (95% CI : -0.4,-0.2) per month. As a result, the release of the study publication appears to have been associated with a change in progestogen-only pill monthly dispensings in Australia as well.
+
+
+``` {r result_table, echo=FALSE}
+
+int_df <- c("Intercept","325.4 (319.5,331.3)","67.9 (65.2,70.8)")
+baseline_df <- c("Baseline Trend","0.2 (-0.1,0.4)","0.1 (0.0,0.2)")
+level_df <- c("Level Shift","-4.8 (-9.8,0.2)","-1.6 (-3.9,0.7)")
+trend_df <- c("Change in Trend","-1.3 (-1.6,-1.0)","-0.3 (-0.4,-0.2)")
+aic_df <- c("AIC","413.9","313.1")
+
+result_df <- rbind(int_df,baseline_df,level_df,trend_df,aic_df)
+colnames(result_df) <- c("Parameter","Combined Dispensing Model, Estimate (95% CI)","Progestogen-Only Dispensing Model, Estimate (95% CI)")
+rownames(result_df) <- NULL
+
+knitr::kable(result_df, align = "c",digits=1, caption = "Fig 4. Combined and Progestogen-Only Segmented Regression Results")
+
+
+```
+Finally, the counter factual plot can be observed in Fig 5.  The counter factual, seen in gray, is the expected number of monthly dispensings had the trend prior to the publication continued.  The observed monthly dispensings, seen in blue, show a clear decrease when compared to the counter factual values.
+
+
+```{r counter_factual,echo=FALSE}
+
+# Create variables representing the step change and slope change had the law NOT been implemented
+# Note that it must be a data frame, and have the same name as the vector used in the modeling
+nochange <- data.frame(grad.lag1=rep(0,length(grad.lag1)), time.after.lag1=rep(0,length(time.after.lag1)))
+
+# Create the predicted time series in the absence of the intervention (i.e. the counter factual)
+combo_cf <- predict(sr_model3, newdata=nochange)
+
+# Merge with the original data
+combo_cf <- ts.union(combo_ts, combo_cf)
+
+# Plot
+plot(combo_cf, plot.type="s", ylim=c(200,400), col=c("dodgerblue2","gray40","gray40","gray40"), lty=c("solid","solid","dashed","dashed"), ylab="Dispensings Per 10,000 Women", xlab="Month", main="Fig 5. Combo Oral Contraceptive Dispensings Per 10,000 Women, Jan 2013-Jun 2018",lwd=2)
+
+#add reference line at May 2015
+abline(v=2015.417, col="red", lwd=1.5, lty="dashed")
+
+#add the legend for two ts groups
+legend("topright", legend=c("Actual Dispensings","Counter Factual Dispensings"), col=c("dodgerblue2","gray40"), lty=c("solid","solid"), cex=.8)
+
+```
+
+
+
+## Discussion
+
+In the time period following the release of the study publication, the combined pill dispensings per month were decreasing.  In comparison, progestogen-only pill dispensings per month were also decreasing.  Both the combined and progestogen-only pill dispensings were decreasing at a similar rate (0.4%) when compared to overall mean monthly dispensings. The _BMJ_ study found no increased risk of blood clots involved with progestogen-only, so the progestogen-only pill dispensings were not expected to decrease due to the study publication. Since both combined and progestogen-only pill dispensings per month were decreasing in the time period following the intervention, there might be an alternative reason for the decrease besides the study publication. 
+
+One possible explanation is that the media attention surrounding the study resulted in distrust in all oral contraceptives. Even though no increased risk of blood clots was found for progestogen-only pills, the public may have lumped all oral contraceptive pills together.  As a result, it is possible that other forms of contraceptives such as condoms, IUD, or patches became more popular.  A limitation of this study is not reviewing the mentioned alternative contraceptive options for the same time period in order to examine differences.  Another limitation of this study is not knowing when certain forms of contraception became available through the PBS. If other methods became available during the study time period, this would have an effect on oral contraceptive dispensings. 
+
+While interrupted time series analysis are one of the best evaluation techniques when randomization and RCTs are not possible, there are limitations.  Some of the limitations include time varying external effects and confounding that are not able to be measured.  Additionally, in this study, using only PBS data is a limitation. Not all dispensings for oral contraceptives are including in the PBS data, and certain combinations are not included at all.  
+
+Due to the findings and limitations above, the causal effect of the intervention on combined pill dispensings per month cannot be decisively concluded.  While this report clearly shows a change in combined pill monthly dispensings in Australia in the time period following the media attention surrounding the study, I can't conclude that the media attention caused the decrease. 
+
+## References
+
+1. Richters J, de Visser RO, Smith AM, Rissel CE, Grulich AE. Sex in Australia: contraceptive practices among a representative sample of women. Aust N Z J Public Health 2003;27:210-6.
+
+2. Vinogradova, Y., Coupland, C., & Hippisley-Cox, J. (2015). Use of combined oral contraceptives and risk of venous thromboembolism: nested case-control studies using the QResearch and CPRD databases. BMJ, 350(may26 13), h2135-h2135. doi: 10.1136/bmj.h2135
+
+3. James Lopez Bernal, Steven Cummins, Antonio Gasparrini, Interrupted time series regression for the evaluation of public health interventions: a tutorial, International Journal of Epidemiology, Volume 46, Issue 1, February 2017, Pages 348–355.
+
+4. Wagner, A., Soumerai, S., Zhang, F., & Ross-Degnan, D. (2002). Segmented regression analysis of interrupted time series studies in medication use research. Journal Of Clinical Pharmacy And Therapeutics, 27(4), 299-309. doi: 10.1046/j.1365-2710.2002.00430.x
+
+5. Schaffer, A., Cairns, R., Brown, J., Gisev, N., Buckley, N., & Pearson, S. (2020). Changes in sales of analgesics to pharmacies after codeine was rescheduled as a prescription only medicine. Medical Journal Of Australia, 212(7), 321-327. doi: 10.5694/mja2.50552
+
+6. Kontopantelis Evangelos, Doran Tim, Springate David A, Buchan Iain, Reeves David. Regression based quasi-experimental approach when randomisation is not an option: interrupted time series analysis BMJ 2015; 350 :h2750
+
+
+## Appendix
+
+**Histograms of Combo and Progestogen-Only Dispensings**
+
+* Both distributons are approximately normal. 
+
+``` {r hist, echo=FALSE}
+
+grid.arrange(combined_hist,mini_hist,ncol=2)
+
+```
+
+**Decomposition and Seasonality Plots**
+
+* Combined and Progestogen-only pills show negative trend beginning in 2015
+* Prior to 2015, combined pill dispensings were constant, progestogen-only pill dispensings were slightly increasing
+* Evidence of seasonality, May and December show increased level of dispensings.
+* Later years for both combined and progestogen-only pills are lower overall
+* Signs of autocorrelation, evidenced by ACF plots and Ljung-Box test below. Evident at low lag intervals.
+
+``` {r de_season, echo=FALSE}
+
+combo_lb_test
+mini_lb_test
+
+acf2(combo_ts)
+acf2(mini_ts)
+
+grid.arrange(combo_de,mini_de,combo_season,mini_season,ncol=2)
+
+```
+
+
+**Combo Segmented Regression Model Output and Diagnostics**
+
+Diagnostic Plots : 
+
+* Residuals show no evidence of autocorrelation, approximately normal. 
+
+``` {r combo_sr,echo=FALSE}
+par(mfrow=c(2,2))
+plot(sr_model3)
+```
+Model Output :
+
+* Passes Ljung-Box test for residual autocorrelation. 
+
+```{r combo_sr2, echo=FALSE}
+
+combo_sr_lb_test
+
+combo_sr_summary
+combo_sr_ci
+combo_sr_aic
+
+```
+
+**Combo ARIMA Model Output and Diagnostics**
+
+* Residuals show no evidence of autocorrelation, approximately normal, and pass Ljung-Box test. 
+
+``` {r arima_output, echo=FALSE}
+
+combo_arima_model <- sarima(combo_ts, p=0, d=0, q=0, P=1, D=1, Q=0, S=12, xreg=cbind(grad.lag1,time.after.lag1))
+
+combo_arima_model
+combo_arima_ci
+
+```
+
+**Progestogen-Only Segmented Regression Model Output and Diagnostics**
+
+Diagnostic Plots : 
+
+* Residuals show no evidence of autocorrelation, approximately normal.
+
+``` {r mini_sr,echo=FALSE}
+par(mfrow=c(2,2))
+plot(sr_mini_model3)
+```
+
+Model Output :
+
+* Passes Ljung-Box test for residual autocorrelation. 
+
+```{r mini_sr2, echo=FALSE}
+
+mini_sr_lb_test
+
+mini_sr_summary
+mini_sr_ci
+mini_sr_aic
+
+```
+
